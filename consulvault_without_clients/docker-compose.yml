@@ -1,0 +1,160 @@
+version: '3'
+
+services:
+
+  consul_s1:
+    image: consul:latest
+    ports:
+      - "8400:8400"
+      - "8500:8500"
+      - "8600:8600"
+      - "8600:8600/udp"
+    healthcheck:
+      test: ["CMD-SHELL", "/bin/sh", "-c", "curl -sfLo /dev/null http://127.0.0.1:8500/v1/health/node/$$HOSTNAME"]
+    command: "agent"
+    volumes:
+      - ./server1.json:/consul/config/basic_config.json
+    networks:
+      vaultnet:
+        ipv4_address: 172.26.26.201
+
+  consul_s2:
+    image: consul:latest
+    volumes:
+      - ./server2.json:/consul/config/basic_config.json
+    healthcheck:
+      test: ["CMD-SHELL", "/bin/sh", "-c", "curl -sfLo /dev/null http://127.0.0.1:8500/v1/health/node/$$HOSTNAME"]
+    command: "agent"
+    networks:
+      vaultnet:
+        ipv4_address: 172.26.26.202
+
+  consul_s3:
+    image: consul:latest
+    volumes:
+      - ./server3.json:/consul/config/basic_config.json
+    healthcheck:
+      test: ["CMD-SHELL", "/bin/sh", "-c", "curl -sfLo /dev/null http://127.0.0.1:8500/v1/health/node/$$HOSTNAME"]
+    command: "agent"
+    networks:
+      vaultnet:
+        ipv4_address: 172.26.26.203
+
+  vault_1:
+   depends_on:
+     - consul_s1
+     - consul_s2
+     - consul_s3
+   image: vault:latest
+   container_name: "vault_1"
+   hostname: "vault_1"
+   cap_add:
+     - IPC_LOCK # prevents memory from being swapped to disk
+   environment:
+     VAULT_API_ADDR: "http://172.26.26.101:8200"
+     VAULT_LOCAL_CONFIG: >-
+       {
+         "backend": {
+           "consul": {
+             "address": "consul_s2:8500",
+             "path": "vault",
+             "scheme": "http"
+           }
+         },
+         "listener": {
+           "tcp": {
+             "address": "0.0.0.0:8200",
+             "tls_disable": "true"
+           }
+         },
+         "default_lease_ttl": "24h",
+         "ui": true,
+         "max_lease_ttl": "720h",
+         "disable_mlock": true
+       }
+   command:
+     - server
+   privileged: true
+   networks:
+     vaultnet:
+       ipv4_address: 172.26.26.101
+
+  vault_2:
+   depends_on:
+     - consul_s1
+     - consul_s2
+     - consul_s3
+   image: vault:latest
+   container_name: "vault_2"
+   hostname: "vault_2"
+   cap_add:
+     - IPC_LOCK # prevents memory from being swapped to disk
+   environment:
+     VAULT_API_ADDR: "http://172.26.26.102:8200"
+     VAULT_LOCAL_CONFIG: >-
+       {
+         "backend": {
+           "consul": {
+             "address": "consul_s3:8500",
+             "path": "vault",
+             "scheme": "http"
+           }
+         },
+         "listener": {
+           "tcp": {
+             "address": "0.0.0.0:8200",
+             "tls_disable": "true"
+           }
+         },
+         "default_lease_ttl": "24h",
+         "ui": true,
+         "max_lease_ttl": "720h",
+         "disable_mlock": true
+       }
+   command:
+     - server
+   privileged: true
+   networks:
+     vaultnet:
+       ipv4_address: 172.26.26.102
+
+  dnsmasq_1:
+    container_name: "dnsmasq_1"
+    hostname: "dnsmasq_1"
+    image: jpillora/dnsmasq 
+    environment:
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=admin
+    expose:
+      - "53/udp"
+    ports:
+      - "5380:8080"
+    volumes:
+      - ./dnsmasq.conf:/etc/dnsmasq.conf
+    networks:
+      vaultnet:
+        ipv4_address: 172.26.26.199
+
+  dnsmasq:
+    container_name: "dnsmasq_2"
+    hostname: "dnsmasq_2"
+    image: jpillora/dnsmasq 
+    environment:
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=admin
+    expose:
+      - "53/udp"
+    ports:
+      - "5381:8080"
+    volumes:
+      - ./dnsmasq.conf:/etc/dnsmasq.conf
+    networks:
+      vaultnet:
+        ipv4_address: 172.26.26.198
+
+networks:
+  vaultnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.26.26.0/24

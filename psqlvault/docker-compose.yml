@@ -1,0 +1,110 @@
+version: "2.1"
+services:
+  vault:
+    depends_on:
+      db: 
+        condition: service_healthy
+    image: vault:latest
+    container_name: "vault"
+    hostname: "vault"
+    cap_add:
+      - IPC_LOCK # prevents memory from being swapped to disk
+    environment:
+      VAULT_API_ADDR: "http://172.26.26.6:8200" 
+      VAULT_LOCAL_CONFIG: '{"backend": {"postgresql": {"connection_url": "postgres://vaultuser:vaultpass@db:5432/vaultdb?sslmode=disable", "ha_enabled": "true", "ha_table": "vault_ha_locks"}}, "listener": {"tcp": {"address": "0.0.0.0:8200", "tls_disable": "true"}}, "default_lease_ttl": "24h", "ui":true, "max_lease_ttl": "720h", "disable_mlock":true}'
+    command:
+      - server
+    privileged: true
+    networks:
+      vaultnet:
+        ipv4_address: 172.26.26.6
+    links:
+      - db
+
+  vault2:
+    depends_on:
+      db:
+        condition: service_healthy
+    image: vault:latest
+    container_name: "vault2"
+    hostname: "vault2"
+    cap_add:
+      - IPC_LOCK # prevents memory from being swapped to disk
+    environment:
+      VAULT_API_ADDR: "http://172.26.26.7:8200"
+      VAULT_LOCAL_CONFIG: '{"backend": {"postgresql": {"connection_url": "postgres://vaultuser:vaultpass@db:5432/vaultdb?sslmode=disable", "ha_enabled": "true", "ha_table": "vault_ha_locks"}}, "listener": {"tcp": {"address": "0.0.0.0:8200", "tls_disable": "true"}}, "default_lease_ttl": "24h", "ui":true, "max_lease_ttl": "720h", "disable_mlock":true}'
+    command:
+      - server
+    privileged: true
+    networks:
+      vaultnet:
+        ipv4_address: 172.26.26.7
+    links:
+      - db
+
+  vault3:
+    depends_on:
+      db:
+        condition: service_healthy
+    image: vault:latest
+    container_name: "vault3"
+    hostname: "vault3"
+    cap_add:
+      - IPC_LOCK # prevents memory from being swapped to disk
+    environment:
+      VAULT_API_ADDR: "http://172.26.26.8:8200"
+      VAULT_LOCAL_CONFIG: '{"backend": {"postgresql": {"connection_url": "postgres://vaultuser:vaultpass@db:5432/vaultdb?sslmode=disable", "ha_enabled": "true", "ha_table": "vault_ha_locks"}}, "listener": {"tcp": {"address": "0.0.0.0:8200", "tls_disable": "true"}}, "default_lease_ttl": "24h", "ui":true, "max_lease_ttl": "720h", "disable_mlock":true}'
+    command:
+      - server
+    privileged: true
+    networks:
+      vaultnet:
+        ipv4_address: 172.26.26.8
+    links:
+      - db
+
+  nginx:
+    image: nginx:latest
+    container_name: "nginx"
+    hostname: "nginx"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - vault
+      - vault2
+      - vault3 
+    ports:
+      - "8080:8080"
+    networks:
+      vaultnet:
+        ipv4_address: 172.26.26.9
+
+  db:
+    image: postgres
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: vaultpass
+      POSTGRES_DB: vaultdb
+      POSTGRES_USER: vaultuser
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --data-checksums"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U posgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./table1.sh:/docker-entrypoint-initdb.d/table1.sh
+      - ./table2.sh:/docker-entrypoint-initdb.d/table2.sh
+    networks:
+      vaultnet:
+        ipv4_address: 172.26.26.5
+
+networks:
+  vaultnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.26.26.0/24
+          gateway: 172.26.26.1
